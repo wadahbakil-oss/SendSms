@@ -7,19 +7,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-      .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; }
+       .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; }
         button { color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; width: 100%; margin: 10px 0; }
         button:disabled { background: #ccc; }
        .btn-whatsapp { background: #25D366; }
        .btn-sms { background: #007bff; }
        .btn-next { background: #ff9800; }
-      .progress { background: #eee; border-radius: 10px; height: 30px; margin: 20px 0; }
-      .bar { background: #25D366; height: 100%; border-radius: 10px; text-align: center; color: white; line-height: 30px; }
-        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+       .progress { background: #eee; border-radius: 10px; height: 30px; margin: 20px 0; }
+       .bar { background: #25D366; height: 100%; border-radius: 10px; text-align: center; color: white; line-height: 30px; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: 14px; }
         td, th { border: 1px solid #ddd; padding: 8px; text-align: right; }
-      .current { background: #fff3cd; }
-      .method { display: flex; gap: 10px; }
-      .method button { flex: 1; }
+       .current { background: #fff3cd; }
+       .method { display: flex; gap: 10px; }
+       .method button { flex: 1; }
+       .debug { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; text-align: left; direction: ltr; }
     </style>
 </head>
 <body>
@@ -28,6 +29,7 @@
 
     <input type="file" id="fileInput" accept=".xlsx,.xls" />
     <div id="stats"></div>
+    <div id="debug" class="debug" style="display:none;"></div>
 
     <div class="method">
         <button id="sendWhatsappBtn" class="btn-whatsapp" disabled>ارسال للكل واتساب</button>
@@ -49,8 +51,9 @@
 <script>
 let customers = [];
 let currentIndex = 0;
-let sendMethod = 'whatsapp'; // whatsapp أو sms
+let sendMethod = 'whatsapp';
 const DEFAULT_PHONE = "967770066128";
+const MIN_BALANCE = 500;
 
 function formatMessage(name, balance) {
     return `سلام الله عليكم يا ${name}، لو سمحت ممكن تسديد الحساب نهاية شهر وبداية الشهر، الصيدلية صيدليتك بأي وقت.
@@ -58,13 +61,11 @@ function formatMessage(name, balance) {
 صيدلية العابد`;
 }
 
-function formatPhone(phone) {
-    if (!phone || phone === 'nan') return '';
-    phone = String(phone).replace(/\D/g, ''); // نحذف أي شيء مش رقم
-    if (!phone.startsWith('967')) {
-        phone = '967' + phone.replace(/^0+/, '');
+function findColumn(row, possibleNames) {
+    for (let name of possibleNames) {
+        if (row.hasOwnProperty(name)) return row[name];
     }
-    return phone;
+    return null;
 }
 
 document.getElementById('fileInput').addEventListener('change', function(e) {
@@ -77,20 +78,32 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet);
 
-        // فلترة: رصيد > 500 فقط
-        customers = json.filter(row => {
-            const balance = row['الرصيد'] || row['رصيد'] || row['Balance'] || 0;
-            return balance > 500;
-        }).map(row => ({
-            name: row['الاسم'] || row['اسم'] || row['Name'] || 'عميل',
-            phone: formatPhone(row['رقم الجوال'] || row['الجوال'] || row['Phone']),
-            balance: row['الرصيد'] || row['رصيد'] || row['Balance'] || 0,
-            sent: false
-        }));
+        // نطبع أسماء الأعمدة عشان تشوفها
+        if (json.length > 0) {
+            document.getElementById('debug').style.display = 'block';
+            document.getElementById('debug').innerHTML = 'أسماء الأعمدة في ملفك: ' + Object.keys(json[0]).join(' | ');
+        }
+
+        // نقرأ بكل الأسماء المحتملة
+        customers = json.map(row => {
+            const name = findColumn(row, ['الاسم', 'اسم', 'اسم العميل', 'Name', 'name', 'Customer']);
+            const phone = findColumn(row, ['رقم الجوال', 'الجوال', 'رقم الهاتف', 'الهاتف', 'Phone', 'phone', 'Mobile', 'mobile']);
+            let balance = findColumn(row, ['الرصيد', 'رصيد', 'المبلغ', 'Balance', 'balance', 'Amount']);
+
+            // نحول الرصيد لرقم
+            balance = parseFloat(String(balance).replace(/[^0-9.-]/g, '')) || 0;
+
+            return {
+                name: String(name || 'عميل').trim(),
+                phone: String(phone || '').replace(/\D/g, ''),
+                balance: balance,
+                sent: false
+            };
+        }).filter(c => c.balance > MIN_BALANCE); // فلترة: رصيد أعلى من 500
 
         renderTable();
-        document.getElementById('sendWhatsappBtn').disabled = false;
-        document.getElementById('sendSmsBtn').disabled = false;
+        document.getElementById('sendWhatsappBtn').disabled = customers.length === 0;
+        document.getElementById('sendSmsBtn').disabled = customers.length === 0;
         document.getElementById('stats').innerHTML = `<p>عدد العملاء للإرسال: ${customers.length}</p>`;
     };
     reader.readAsArrayBuffer(file);
@@ -111,7 +124,7 @@ function renderTable() {
         `;
         tbody.appendChild(tr);
     });
-    document.getElementById('dataTable').style.display = 'table';
+    document.getElementById('dataTable').style.display = customers.length? 'table' : 'none';
 }
 
 function updateProgress() {
@@ -135,14 +148,14 @@ function sendMessage(index) {
     if (!phone) {
         phone = DEFAULT_PHONE;
         msg = `تذكير للعميل: ${customer.name}\n` + msg;
+    } else if (!phone.startsWith('967')) {
+        phone = '967' + phone.replace(/^0+/, '');
     }
 
-    // نفتح واتساب أو SMS حسب الاختيار
     let url;
     if (sendMethod === 'whatsapp') {
         url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
     } else {
-        // SMS - يفتح تطبيق الرسائل العادي
         url = `sms:${phone}?body=${encodeURIComponent(msg)}`;
     }
 
@@ -174,7 +187,6 @@ document.getElementById('nextBtn').onclick = function() {
     sendMessage(currentIndex);
 };
 
-// لما ترجع من واتساب/الرسائل للصفحة، يسألك ويفتح الرقم التالي
 document.addEventListener('visibilitychange', function() {
     if (!document.hidden && currentIndex > 0 && currentIndex < customers.length) {
         setTimeout(() => {
