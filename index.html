@@ -7,20 +7,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-       .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; }
-        button { color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; width: 100%; margin: 10px 0; }
-        button:disabled { background: #ccc; }
-       .btn-whatsapp { background: #25D366; }
-       .btn-sms { background: #007bff; }
-       .btn-next { background: #ff9800; }
-       .progress { background: #eee; border-radius: 10px; height: 30px; margin: 20px 0; }
-       .bar { background: #25D366; height: 100%; border-radius: 10px; text-align: center; color: white; line-height: 30px; }
+      .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; }
+        button { color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; width: 100%; margin: 10px 0; cursor: pointer; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+      .btn-whatsapp { background: #25D366; }
+      .btn-sms { background: #007bff; }
+      .btn-next { background: #ff9800; }
+      .progress { background: #eee; border-radius: 10px; height: 30px; margin: 20px 0; }
+      .bar { background: #25D366; height: 100%; border-radius: 10px; text-align: center; color: white; line-height: 30px; transition: width 0.3s; }
         table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: 14px; }
         td, th { border: 1px solid #ddd; padding: 8px; text-align: right; }
-       .current { background: #fff3cd; }
-       .method { display: flex; gap: 10px; }
-       .method button { flex: 1; }
-       .debug { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; text-align: left; direction: ltr; }
+      .current { background: #fff3cd; font-weight: bold; }
+      .method { display: flex; gap: 10px; }
+      .method button { flex: 1; }
+      .info { background: #e7f3ff; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -28,8 +28,7 @@
     <h2>مرسل تذكيرات صيدلية العابد</h2>
 
     <input type="file" id="fileInput" accept=".xlsx,.xls" />
-    <div id="stats"></div>
-    <div id="debug" class="debug" style="display:none;"></div>
+    <div id="stats" class="info"></div>
 
     <div class="method">
         <button id="sendWhatsappBtn" class="btn-whatsapp" disabled>ارسال للكل واتساب</button>
@@ -57,54 +56,39 @@ const MIN_BALANCE = 500;
 
 function formatMessage(name, balance) {
     return `سلام الله عليكم يا ${name}، لو سمحت ممكن تسديد الحساب نهاية شهر وبداية الشهر، الصيدلية صيدليتك بأي وقت.
-حسابك: ${balance} ريال
+حسابك: ${balance.toLocaleString()} ريال
 صيدلية العابد`;
-}
-
-function findColumn(row, possibleNames) {
-    for (let name of possibleNames) {
-        if (row.hasOwnProperty(name)) return row[name];
-    }
-    return null;
 }
 
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
-    const reader = new FileReader();
+    if (!file) return;
 
+    const reader = new FileReader();
     reader.onload = function(e) {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, {type: 'array'});
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet);
 
-        // نطبع أسماء الأعمدة عشان تشوفها
-        if (json.length > 0) {
-            document.getElementById('debug').style.display = 'block';
-            document.getElementById('debug').innerHTML = 'أسماء الأعمدة في ملفك: ' + Object.keys(json[0]).join(' | ');
-        }
-
-        // نقرأ بكل الأسماء المحتملة
-        customers = json.map(row => {
-            const name = findColumn(row, ['الاسم', 'اسم', 'اسم العميل', 'Name', 'name', 'Customer']);
-            const phone = findColumn(row, ['رقم الجوال', 'الجوال', 'رقم الهاتف', 'الهاتف', 'Phone', 'phone', 'Mobile', 'mobile']);
-            let balance = findColumn(row, ['الرصيد', 'رصيد', 'المبلغ', 'Balance', 'balance', 'Amount']);
-
-            // نحول الرصيد لرقم
-            balance = parseFloat(String(balance).replace(/[^0-9.-]/g, '')) || 0;
-
-            return {
-                name: String(name || 'عميل').trim(),
-                phone: String(phone || '').replace(/\D/g, ''),
-                balance: balance,
-                sent: false
-            };
-        }).filter(c => c.balance > MIN_BALANCE); // فلترة: رصيد أعلى من 500
+        // نقرأ بالأسماء الصحيحة من ملفك
+        customers = json.map(row => ({
+            name: String(row['اسم العميل'] || 'عميل').trim(),
+            phone: String(row['رقم الهاتف'] || '').replace(/\D/g, ''),
+            balance: parseFloat(row['إجمالي الرصيد النهائي']) || 0,
+            sent: false
+        })).filter(c => c.balance > MIN_BALANCE); // فقط اللي رصيده أعلى من 500
 
         renderTable();
         document.getElementById('sendWhatsappBtn').disabled = customers.length === 0;
         document.getElementById('sendSmsBtn').disabled = customers.length === 0;
-        document.getElementById('stats').innerHTML = `<p>عدد العملاء للإرسال: ${customers.length}</p>`;
+
+        const withPhone = customers.filter(c => c.phone).length;
+        const withoutPhone = customers.length - withPhone;
+        document.getElementById('stats').innerHTML = `
+            <b>عدد العملاء للإرسال:</b> ${customers.length} <br>
+            <b>عندهم رقم:</b> ${withPhone} | <b>بدون رقم:</b> ${withoutPhone} سيتم الإرسال للرقم الثابت
+        `;
     };
     reader.readAsArrayBuffer(file);
 });
@@ -114,12 +98,12 @@ function renderTable() {
     tbody.innerHTML = '';
     customers.forEach((c, i) => {
         const tr = document.createElement('tr');
-        if (i === currentIndex) tr.className = 'current';
+        if (i === currentIndex && currentIndex < customers.length) tr.className = 'current';
         tr.innerHTML = `
             <td>${i+1}</td>
             <td>${c.name}</td>
             <td>${c.phone || 'لا يوجد'}</td>
-            <td>${c.balance}</td>
+            <td>${c.balance.toLocaleString()}</td>
             <td>${c.sent? '✅ تم' : '⏳ انتظار'}</td>
         `;
         tbody.appendChild(tr);
@@ -136,8 +120,9 @@ function updateProgress() {
 
 function sendMessage(index) {
     if (index >= customers.length) {
-        alert('تم الانتهاء من ارسال جميع الرسائل');
+        alert('تم الانتهاء من ارسال جميع الرسائل ✅');
         document.getElementById('nextBtn').style.display = 'none';
+        document.querySelector('.method').style.display = 'flex';
         return;
     }
 
@@ -160,7 +145,6 @@ function sendMessage(index) {
     }
 
     window.location.href = url;
-
     customers[index].sent = true;
     currentIndex = index + 1;
     renderTable();
